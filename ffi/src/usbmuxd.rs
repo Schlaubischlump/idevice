@@ -227,16 +227,9 @@ pub unsafe extern "C" fn idevice_usbmuxd_connect_to_device(
     label: *const c_char,
     idevice: *mut *mut IdeviceHandle,
 ) -> *mut IdeviceFfiError {
-    if usbmuxd_connection.is_null() {
+    if usbmuxd_connection.is_null() || label.is_null() || idevice.is_null() {
         return ffi_err!(IdeviceError::FfiInvalidArg);
     }
-
-    // Take ownership of the connection handle
-    let conn = unsafe {
-        let conn = std::ptr::read(&(*usbmuxd_connection).0); // move the inner connection
-        drop(Box::from_raw(usbmuxd_connection)); // free the wrapper
-        conn
-    };
 
     let label = unsafe {
         match CStr::from_ptr(label).to_str() {
@@ -244,6 +237,11 @@ pub unsafe extern "C" fn idevice_usbmuxd_connect_to_device(
             Err(_) => return ffi_err!(IdeviceError::FfiInvalidArg),
         }
     };
+
+    // Move the connection out of its owning box. Using `ptr::read` followed by
+    // dropping the box would also drop the original value, leaving `conn` with
+    // a freed socket and causing a use-after-free/double-drop.
+    let UsbmuxdConnectionHandle(conn) = *unsafe { Box::from_raw(usbmuxd_connection) };
 
     let res = run_sync(async move { conn.connect_to_device(device_id, port, label).await });
 
