@@ -144,6 +144,86 @@ pub unsafe extern "C" fn usbmuxd_provider_new(
         udid,
         device_id,
         label,
+        pairing_file: None,
+    };
+
+    let boxed = Box::new(IdeviceProviderHandle(Box::new(p)));
+    unsafe { *provider = Box::into_raw(boxed) };
+
+    null_mut()
+}
+
+/// Creates a usbmuxd provider with an explicit pairing file.
+///
+/// The provider returns this pairing file for secure service connections and
+/// reconnects instead of reading the pairing record from usbmuxd.
+///
+/// # Arguments
+/// * [`addr`] - The UsbmuxdAddr handle to connect to
+/// * [`tag`] - The tag returned in usbmuxd responses
+/// * [`udid`] - The UDID of the device to connect to
+/// * [`device_id`] - The muxer ID of the device to connect to
+/// * [`pairing_file`] - The pairing file to use for secure connections
+/// * [`label`] - The label to use with the connection
+/// * [`provider`] - A pointer to a newly allocated provider
+///
+/// # Returns
+/// An IdeviceFfiError on error, null on success
+///
+/// # Safety
+/// `addr` must be a valid pointer to UsbmuxdAddrHandle created by this library
+/// `pairing_file` must be a valid pointer created by this library
+/// `udid` and `label` must be valid C strings
+/// `provider` must be a valid, non-null output pointer
+///
+/// On success, `addr` and `pairing_file` are consumed and must not be used
+/// again. On error, ownership remains with the caller.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn usbmuxd_provider_new_with_pairing_file(
+    addr: *mut UsbmuxdAddrHandle,
+    tag: u32,
+    udid: *const c_char,
+    device_id: u32,
+    pairing_file: *mut IdevicePairingFile,
+    label: *const c_char,
+    provider: *mut *mut IdeviceProviderHandle,
+) -> *mut IdeviceFfiError {
+    if addr.is_null()
+        || udid.is_null()
+        || pairing_file.is_null()
+        || label.is_null()
+        || provider.is_null()
+    {
+        return ffi_err!(IdeviceError::FfiInvalidArg);
+    }
+
+    let udid = match unsafe { CStr::from_ptr(udid) }.to_str() {
+        Ok(u) => u.to_string(),
+        Err(e) => {
+            tracing::error!("Invalid UDID string: {e:?}");
+            return ffi_err!(IdeviceError::FfiInvalidString);
+        }
+    };
+
+    let label = match unsafe { CStr::from_ptr(label) }.to_str() {
+        Ok(l) => l.to_string(),
+        Err(e) => {
+            tracing::error!("Invalid label string: {e:?}");
+            return ffi_err!(IdeviceError::FfiInvalidArg);
+        }
+    };
+
+    // Consume the owned inputs only after all validation has succeeded.
+    let addr = unsafe { Box::from_raw(addr) }.0;
+    let pairing_file = unsafe { Box::from_raw(pairing_file) }.0;
+
+    let p = UsbmuxdProvider {
+        addr,
+        tag,
+        udid,
+        device_id,
+        label,
+        pairing_file: Some(pairing_file),
     };
 
     let boxed = Box::new(IdeviceProviderHandle(Box::new(p)));

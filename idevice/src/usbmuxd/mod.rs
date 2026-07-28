@@ -495,6 +495,7 @@ impl UsbmuxdDevice {
             udid: self.udid.clone(),
             device_id: self.device_id,
             label,
+            pairing_file: None,
         }
     }
 }

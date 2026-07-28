@@ -122,6 +122,11 @@ pub struct UsbmuxdProvider {
     pub device_id: u32,
     /// Connection label
     pub label: String,
+    /// Optional caller-supplied pairing file.
+    ///
+    /// When present, secure reconnecting workflows use this record without
+    /// consulting usbmuxd's pairing-record database.
+    pub pairing_file: Option<PairingFile>,
 }
 
 #[cfg(feature = "usbmuxd")]
@@ -153,10 +158,15 @@ impl IdeviceProvider for UsbmuxdProvider {
         &self.label
     }
 
-    /// Retrieves the pairing record from usbmuxd
+    /// Returns the caller-supplied pairing record, or retrieves it from usbmuxd.
     fn get_pairing_file(
         &self,
     ) -> Pin<Box<dyn Future<Output = Result<PairingFile, IdeviceError>> + Send>> {
+        if let Some(pairing_file) = &self.pairing_file {
+            let pairing_file = pairing_file.clone();
+            return Box::pin(async move { Ok(pairing_file) });
+        }
+
         let addr = self.addr.clone();
         let tag = self.tag;
         let udid = self.udid.clone();
@@ -177,5 +187,42 @@ impl RsdProvider for std::net::IpAddr {
         Ok(Box::new(
             tokio::net::TcpStream::connect((*self, port)).await?,
         ))
+    }
+}
+
+#[cfg(all(test, feature = "usbmuxd", feature = "rustls"))]
+mod tests {
+    use super::*;
+    use rustls::pki_types::CertificateDer;
+
+    #[tokio::test]
+    async fn usbmuxd_provider_prefers_explicit_pairing_file() {
+        let pairing_file = PairingFile {
+            device_certificate: CertificateDer::from(vec![1]),
+            host_private_key: vec![2],
+            host_certificate: CertificateDer::from(vec![3]),
+            root_private_key: vec![4],
+            root_certificate: CertificateDer::from(vec![5]),
+            system_buid: "private-system-buid".into(),
+            host_id: "private-host-id".into(),
+            escrow_bag: None,
+            wifi_mac_address: "00:00:00:00:00:00".into(),
+            udid: Some("private-udid".into()),
+        };
+        let provider = UsbmuxdProvider {
+            // This path must never be contacted while an explicit pairing file
+            // is present.
+            addr: UsbmuxdAddr::TcpSocket("127.0.0.1:0".parse().unwrap()),
+            tag: 0,
+            udid: "private-udid".into(),
+            device_id: 1,
+            label: "provider-test".into(),
+            pairing_file: Some(pairing_file),
+        };
+
+        let returned = provider.get_pairing_file().await.unwrap();
+
+        assert_eq!(returned.host_id, "private-host-id");
+        assert_eq!(returned.system_buid, "private-system-buid");
     }
 }
