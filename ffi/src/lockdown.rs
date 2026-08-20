@@ -270,6 +270,44 @@ pub unsafe extern "C" fn lockdownd_pair(
     }
 }
 
+/// Unpairs the host identity from the device through lockdownd.
+///
+/// # Arguments
+/// * `client` - A valid LockdowndClient handle
+/// * `host_id` - The HostID stored in the pairing record
+///
+/// # Returns
+/// An IdeviceFfiError on error, null on success
+///
+/// # Safety
+/// `client` must be a valid pointer to a handle allocated by this library
+/// `host_id` must be a valid null-terminated string
+#[unsafe(no_mangle)]
+#[cfg(feature = "pair")]
+pub unsafe extern "C" fn lockdownd_unpair(
+    client: *mut LockdowndClientHandle,
+    host_id: *const libc::c_char,
+) -> *mut IdeviceFfiError {
+    if client.is_null() || host_id.is_null() {
+        return ffi_err!(IdeviceError::FfiInvalidArg);
+    }
+
+    let host_id = unsafe {
+        std::ffi::CStr::from_ptr(host_id)
+            .to_string_lossy()
+            .into_owned()
+    };
+    let res = run_sync_local(async move {
+        let client_ref = unsafe { &mut (*client).0 };
+        client_ref.unpair(host_id).await
+    });
+
+    match res {
+        Ok(()) => null_mut(),
+        Err(e) => ffi_err!(e),
+    }
+}
+
 /// Gets a value from lockdownd
 ///
 /// # Arguments
